@@ -1,0 +1,6 @@
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.hta text eol=crlf
+*.md text eol=lf
+.gitignore text eol=lf
+.gitattributes text eol=lf

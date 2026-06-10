@@ -1,0 +1,8 @@
+exports/
+test-export/
+*.log
+*.db
+*.db-shm
+*.db-wal
+UserSettings.ini
+_selected_conversation_checkpoint.json

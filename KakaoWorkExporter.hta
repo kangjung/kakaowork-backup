@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>KakaoWork Conversation Exporter</title>
+  <HTA:APPLICATION
+    ID="KakaoWorkExporter"
+    APPLICATIONNAME="KakaoWork Conversation Exporter"
+    BORDER="thin"
+    CAPTION="yes"
+    MAXIMIZEBUTTON="no"
+    MINIMIZEBUTTON="yes"
+    SCROLL="no"
+    SINGLEINSTANCE="yes"
+    SYSMENU="yes"
+    WINDOWSTATE="normal"
+  >
+  <style>
+    body {
+      margin: 0;
+      background: #f4f5f7;
+      color: #202124;
+      font-family: "Segoe UI", "Malgun Gothic", sans-serif;
+      font-size: 14px;
+    }
+    .wrap {
+      width: 600px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 24px;
+    }
+    .description {
+      margin-bottom: 20px;
+      color: #5f6368;
+      line-height: 1.6;
+    }
+    .card {
+      padding: 20px;
+      background: #fff;
+      border: 1px solid #dadce0;
+      border-radius: 12px;
+    }
+    label {
+      display: block;
+      margin: 0 0 6px;
+      font-weight: 600;
+    }
+    .hint {
+      margin: 5px 0 16px;
+      color: #777;
+      font-size: 12px;
+    }
+    input[type="text"], input[type="number"] {
+      box-sizing: border-box;
+      width: 100%;
+      padding: 9px 10px;
+      border: 1px solid #c7cbd1;
+      border-radius: 6px;
+      font: inherit;
+    }
+    .path-row {
+      display: table;
+      width: 100%;
+    }
+    .path-cell {
+      display: table-cell;
+      width: 100%;
+      padding-right: 8px;
+    }
+    .button-cell {
+      display: table-cell;
+      white-space: nowrap;
+    }
+    button {
+      padding: 9px 14px;
+      border: 0;
+      border-radius: 6px;
+      background: #e4e7eb;
+      color: #202124;
+      cursor: pointer;
+      font: inherit;
+    }
+    button.primary {
+      width: 100%;
+      margin-top: 18px;
+      padding: 12px;
+      background: #f9d835;
+      font-weight: 700;
+    }
+    button:disabled {
+      cursor: default;
+      opacity: .55;
+    }
+    .check-row {
+      margin-top: 16px;
+    }
+    .check-row label {
+      display: inline;
+      font-weight: 400;
+    }
+    .status {
+      min-height: 42px;
+      margin-top: 16px;
+      padding: 11px 12px;
+      border-radius: 6px;
+      background: #f1f3f4;
+      color: #4d5156;
+      line-height: 1.5;
+      white-space: pre-wrap;
+    }
+    .status.success {
+      background: #e6f4ea;
+      color: #137333;
+    }
+    .status.error {
+      background: #fce8e6;
+      color: #c5221f;
+    }
+    .warning {
+      margin-top: 14px;
+      color: #8a5b00;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .github-link {
+      position: fixed;
+      top: 12px;
+      right: 14px;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      color: #5f6368;
+      font-size: 12px;
+      text-decoration: none;
+      cursor: pointer;
+    }
+    .github-link:hover {
+      color: #202124;
+      text-decoration: underline;
+    }
+  </style>
+  <script language="javascript">
+    var runningProcess = null;
+    var pollTimer = null;
+
+    function getApplicationDirectory() {
+      var path = decodeURIComponent(window.location.pathname);
+      path = path.replace(/\//g, "\\");
+      if (path.charAt(0) === "\\" && path.charAt(2) === ":") {
+        path = path.substring(1);
+      }
+      var fso = new ActiveXObject("Scripting.FileSystemObject");
+      return fso.GetParentFolderName(path);
+    }
+
+    function quoteArgument(value) {
+      return '"' + String(value).replace(/"/g, "'") + '"';
+    }
+
+    function setStatus(message, kind) {
+      var element = document.getElementById("status");
+      element.className = "status" + (kind ? " " + kind : "");
+      element.innerText = message;
+    }
+
+    function browseOutputDirectory() {
+      var shell = new ActiveXObject("Shell.Application");
+      var folder = shell.BrowseForFolder(
+        0,
+        "대화 내보내기 결과를 저장할 폴더를 선택하세요.",
+        0,
+        document.getElementById("outputDirectory").value
+      );
+      if (folder) {
+        document.getElementById("outputDirectory").value =
+          folder.Self.Path;
+      }
+    }
+
+    function startExport() {
+      if (runningProcess) {
+        return;
+      }
+
+      var title = document.getElementById("conversationTitle").value;
+      var outputDirectory = document.getElementById("outputDirectory").value;
+      var maximumScrolls = document.getElementById("maximumScrolls").value;
+      var includeImages = document.getElementById("includeImages").checked;
+
+      if (!title.replace(/\s/g, "")) {
+        alert("현재 열어 둔 대화방 이름을 입력하세요.");
+        document.getElementById("conversationTitle").focus();
+        return;
+      }
+      if (!outputDirectory.replace(/\s/g, "")) {
+        alert("저장 폴더를 선택하세요.");
+        return;
+      }
+
+      var appDirectory = getApplicationDirectory();
+      if (
+        outputDirectory.indexOf(":") < 0 &&
+        outputDirectory.indexOf("\\\\") !== 0
+      ) {
+        outputDirectory = appDirectory + "\\" + outputDirectory;
+      }
+      var scriptPath = appDirectory + "\\Export-KakaoWorkConversation.ps1";
+      var command =
+        "powershell.exe -NoProfile -ExecutionPolicy Bypass -File " +
+        quoteArgument(scriptPath) +
+        " -ConversationTitle " + quoteArgument(title) +
+        " -OutputDirectory " + quoteArgument(outputDirectory) +
+        " -MaximumScrolls " + parseInt(maximumScrolls, 10);
+
+      if (!includeImages) {
+        command += " -SkipImages";
+      }
+
+      try {
+        var shell = new ActiveXObject("WScript.Shell");
+        runningProcess = shell.Exec(command);
+        document.getElementById("startButton").disabled = true;
+        setStatus(
+          "반출 중입니다.\n카카오워크 창을 가리지 말고 다른 대화방으로 이동하지 마세요.",
+          ""
+        );
+        pollTimer = window.setInterval(checkExportStatus, 1000);
+      }
+      catch (error) {
+        runningProcess = null;
+        setStatus("실행할 수 없습니다: " + error.message, "error");
+      }
+    }
+
+    function checkExportStatus() {
+      if (!runningProcess || runningProcess.Status === 0) {
+        return;
+      }
+
+      window.clearInterval(pollTimer);
+      pollTimer = null;
+
+      var exitCode = runningProcess.ExitCode;
+      var standardOutput = runningProcess.StdOut.ReadAll();
+      var standardError = runningProcess.StdErr.ReadAll();
+      runningProcess = null;
+      document.getElementById("startButton").disabled = false;
+
+      if (exitCode === 0) {
+        setStatus(
+          "반출이 완료되었습니다.\n저장 폴더에서 HTML, JSON, 이미지 폴더를 확인하세요.",
+          "success"
+        );
+      }
+      else {
+        var detail = standardError || standardOutput || "알 수 없는 오류";
+        setStatus("반출 실패\n" + detail, "error");
+      }
+    }
+
+    function openGitHub() {
+      try {
+        new ActiveXObject("WScript.Shell").Run(
+          "https://github.com/kangjung/kakaowork-backup"
+        );
+      }
+      catch (error) {
+        alert("링크를 열 수 없습니다: " + error.message);
+      }
+    }
+
+    function initialize() {
+      window.resizeTo(680, 690);
+      document.getElementById("outputDirectory").value = "exports";
+      document.getElementById("conversationTitle").focus();
+    }
+  </script>
+</head>
+<body onload="initialize()">
+  <a
+    class="github-link"
+    title="GitHub 저장소 열기"
+    onclick="openGitHub(); return false;"
+  >
+    <svg height="14" width="14" viewBox="0 0 16 16" fill="currentColor">
+      <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"></path>
+    </svg>
+    GitHub
+  </a>
+  <div class="wrap">
+    <h1>카카오워크 대화 반출</h1>
+    <div class="description">
+      카카오워크에서 반출할 대화방을 먼저 열고 아래 정보를 입력하세요.
+      현재 화면에 접근 가능한 메시지만 저장됩니다.
+    </div>
+
+    <div class="card">
+      <label for="conversationTitle">대화방 이름</label>
+      <input
+        type="text"
+        id="conversationTitle"
+        placeholder="예: 개발팀 업무방"
+      >
+      <div class="hint">
+        결과 파일명과 HTML 제목에 사용됩니다.
+      </div>
+
+      <label for="outputDirectory">저장 폴더</label>
+      <div class="path-row">
+        <div class="path-cell">
+          <input type="text" id="outputDirectory">
+        </div>
+        <div class="button-cell">
+          <button onclick="browseOutputDirectory()">폴더 선택</button>
+        </div>
+      </div>
+
+      <div class="check-row">
+        <input type="checkbox" id="includeImages" checked>
+        <label for="includeImages">화면에 표시되는 이미지도 PNG로 저장</label>
+      </div>
+
+      <div style="margin-top:16px">
+        <label for="maximumScrolls">최대 스크롤 횟수</label>
+        <input type="number" id="maximumScrolls" value="500" min="1">
+        <div class="hint">
+          일반적으로 500을 사용합니다. 대화가 매우 많으면 늘릴 수 있습니다.
+        </div>
+      </div>
+
+      <button
+        id="startButton"
+        class="primary"
+        onclick="startExport()"
+      >반출 시작</button>
+
+      <div id="status" class="status">대기 중</div>
+
+      <div class="warning">
+        실행 중에는 카카오워크를 최소화하거나 다른 창으로 가리지 마세요.
+        이미지 캡처와 메시지 스크롤이 끝날 때까지 다른 대화방으로 이동하지
+        않는 것이 안전합니다.
+      </div>
+    </div>
+  </div>
+</body>
+</html>
