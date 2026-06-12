@@ -1,6 +1,7 @@
 param(
     [string] $OutputDirectory = (Join-Path $PSScriptRoot 'exports'),
     [int] $MaximumScrolls = 500,
+    [int] $ScrollDelayMilliseconds = 700,
     [string] $ConversationTitle,
     [switch] $SkipImages,
     [switch] $ScreenCapture
@@ -64,26 +65,44 @@ function Find-ByAutomationId {
     )
 }
 
+$script:TextCacheRequest = New-Object Windows.Automation.CacheRequest
+$script:TextCacheRequest.Add(
+    [Windows.Automation.AutomationElement]::NameProperty
+)
+$script:TextCacheRequest.Add(
+    [Windows.Automation.AutomationElement]::AutomationIdProperty
+)
+$script:TextCondition = New-Object Windows.Automation.PropertyCondition(
+    [Windows.Automation.AutomationElement]::ControlTypeProperty,
+    [Windows.Automation.ControlType]::Text
+)
+
 function Get-DescendantTexts {
     param([Windows.Automation.AutomationElement] $Element)
 
-    $elements = $Element.FindAll(
-        [Windows.Automation.TreeScope]::Descendants,
-        [Windows.Automation.Condition]::TrueCondition
-    )
-
+    # Only Text controls are needed, and Name/AutomationId are fetched in a
+    # single batched cross-process call via the cache request. Walking the whole
+    # subtree with per-element .Current.* reads was the main bottleneck.
     $result = @()
-    for ($index = 0; $index -lt $elements.Count; $index++) {
-        $child = $elements.Item($index)
-        if (
-            $child.Current.ControlType -eq [Windows.Automation.ControlType]::Text -and
-            -not [string]::IsNullOrWhiteSpace($child.Current.Name)
-        ) {
-            $result += [PSCustomObject]@{
-                AutomationId = $child.Current.AutomationId
-                Text = $child.Current.Name
+    $activation = $script:TextCacheRequest.Activate()
+    try {
+        $elements = $Element.FindAll(
+            [Windows.Automation.TreeScope]::Descendants,
+            $script:TextCondition
+        )
+        for ($index = 0; $index -lt $elements.Count; $index++) {
+            $child = $elements.Item($index)
+            $text = $child.Cached.Name
+            if (-not [string]::IsNullOrWhiteSpace($text)) {
+                $result += [PSCustomObject]@{
+                    AutomationId = $child.Cached.AutomationId
+                    Text = $text
+                }
             }
         }
+    }
+    finally {
+        $activation.Dispose()
     }
     return $result
 }
@@ -128,13 +147,32 @@ function Get-WindowFrame {
     }
 }
 
-function Save-MessageImages {
-    param(
-        [Windows.Automation.AutomationElement] $Item,
-        [string] $ImageDirectory,
-        $Frame,
-        [Drawing.Rectangle] $ViewportRectangle
+function ConvertTo-PixelRectangle {
+    # UI Automation reports an empty/unrendered element's BoundingRectangle with
+    # infinite or NaN edges. Converting those to Int32 throws, so return $null
+    # for such elements and let callers skip them.
+    param($BoundingRectangle)
+
+    $bounds = $BoundingRectangle
+    if (
+        $null -eq $bounds -or
+        [double]::IsInfinity($bounds.Left) -or [double]::IsNaN($bounds.Left) -or
+        [double]::IsInfinity($bounds.Top) -or [double]::IsNaN($bounds.Top) -or
+        [double]::IsInfinity($bounds.Right) -or [double]::IsNaN($bounds.Right) -or
+        [double]::IsInfinity($bounds.Bottom) -or [double]::IsNaN($bounds.Bottom)
+    ) {
+        return $null
+    }
+    return [Drawing.Rectangle]::FromLTRB(
+        [int][Math]::Round($bounds.Left),
+        [int][Math]::Round($bounds.Top),
+        [int][Math]::Round($bounds.Right),
+        [int][Math]::Round($bounds.Bottom)
     )
+}
+
+function Find-MessageImageControls {
+    param([Windows.Automation.AutomationElement] $Item)
 
     if ($SkipImages) {
         return @()
@@ -158,16 +196,32 @@ function Save-MessageImages {
         [Windows.Automation.TreeScope]::Descendants,
         $imageCondition
     )
+    $result = @()
+    for ($index = 0; $index -lt $elements.Count; $index++) {
+        $result += $elements.Item($index)
+    }
+    return $result
+}
+
+function Save-MessageImages {
+    param(
+        [Windows.Automation.AutomationElement[]] $ImageElements,
+        [string] $ImageDirectory,
+        $Frame,
+        [Drawing.Rectangle] $ViewportRectangle
+    )
+
+    if ($SkipImages -or $null -eq $ImageElements) {
+        return @()
+    }
+
     $savedFiles = @()
 
-    for ($index = 0; $index -lt $elements.Count; $index++) {
-        $rectangle = $elements.Item($index).Current.BoundingRectangle
-        $captureRectangle = [Drawing.Rectangle]::FromLTRB(
-            [int][Math]::Round($rectangle.Left),
-            [int][Math]::Round($rectangle.Top),
-            [int][Math]::Round($rectangle.Right),
-            [int][Math]::Round($rectangle.Bottom)
-        )
+    foreach ($element in $ImageElements) {
+        $captureRectangle = ConvertTo-PixelRectangle $element.Current.BoundingRectangle
+        if ($null -eq $captureRectangle) {
+            continue
+        }
         $captureRectangle.Intersect($ViewportRectangle)
 
         if ($captureRectangle.Width -lt 40 -or $captureRectangle.Height -lt 40) {
@@ -247,8 +301,9 @@ function Get-MessageRecord {
     param(
         [Windows.Automation.AutomationElement] $Item,
         [string] $ImageDirectory,
-        $Frame,
-        [Drawing.Rectangle] $ViewportRectangle
+        [hashtable] $FrameHolder,
+        [Drawing.Rectangle] $ViewportRectangle,
+        [hashtable] $Cache
     )
 
     $texts = @(Get-DescendantTexts $Item)
@@ -281,7 +336,64 @@ function Get-MessageRecord {
             } |
             Select-Object -ExpandProperty Text
     )
-    $imageFiles = @(Save-MessageImages $Item $ImageDirectory $Frame $ViewportRectangle)
+
+    # Locate image controls without capturing yet. Their count, on-screen state
+    # and properties let us build a stable cache key and decide whether this
+    # item can be safely reused on a later scroll instead of re-captured.
+    $imageElements = @(Find-MessageImageControls $Item)
+    $imageMeta = @()
+    $allImagesNamed = $true
+    $allImagesFullyVisible = $true
+    foreach ($element in $imageElements) {
+        $name = $element.Current.Name
+        if ([string]::IsNullOrWhiteSpace($name)) {
+            $allImagesNamed = $false
+        }
+        $elementRectangle = ConvertTo-PixelRectangle $element.Current.BoundingRectangle
+        if ($null -eq $elementRectangle) {
+            # No on-screen bounds: cannot be reliably captured this pass, so
+            # never treat the item as fully visible (do not cache it).
+            $allImagesFullyVisible = $false
+            $imageMeta += ('{0}|offscreen' -f $name)
+            continue
+        }
+        if (-not $ViewportRectangle.Contains($elementRectangle)) {
+            $allImagesFullyVisible = $false
+        }
+        $imageMeta += '{0}|{1}x{2}' -f `
+            $name, $elementRectangle.Width, $elementRectangle.Height
+    }
+
+    # Reuse a cached record only when re-capturing is guaranteed to produce the
+    # same result: no images, or every image is fully on screen AND has a
+    # distinguishing Name. Items with clipped or unnamed images fall through to
+    # capture on every pass (slower, but never loses or merges an image).
+    $cacheable = ($imageElements.Count -eq 0) -or
+        ($allImagesNamed -and $allImagesFullyVisible)
+    $stableKey = @(
+        $sender,
+        $body,
+        $translation,
+        ($otherTexts -join "`n"),
+        $Item.Current.Name,
+        ($imageMeta -join "`n")
+    ) -join [char]31
+
+    if ($cacheable -and $null -ne $Cache -and $Cache.ContainsKey($stableKey)) {
+        return $Cache[$stableKey]
+    }
+
+    # Capture the window frame lazily: only the first time an item with images
+    # actually needs it this pass, so image-free scrolls skip PrintWindow.
+    if (
+        $imageElements.Count -gt 0 -and
+        -not $SkipImages -and -not $ScreenCapture -and
+        $null -ne $FrameHolder -and $null -eq $FrameHolder.Frame
+    ) {
+        $FrameHolder.Frame = Get-WindowFrame $windowHandle
+    }
+    $frame = if ($null -ne $FrameHolder) { $FrameHolder.Frame } else { $null }
+    $imageFiles = @(Save-MessageImages $imageElements $ImageDirectory $frame $ViewportRectangle)
 
     $kind = if ($imageFiles.Count -gt 0) {
         'image'
@@ -316,7 +428,7 @@ function Get-MessageRecord {
         $sha.Dispose()
     }
 
-    return [PSCustomObject]@{
+    $record = [PSCustomObject]@{
         Signature = $signature
         Kind = $kind
         Sender = $sender
@@ -325,6 +437,11 @@ function Get-MessageRecord {
         OtherTexts = $otherTexts
         ImageFiles = $imageFiles
     }
+
+    if ($cacheable -and $null -ne $Cache) {
+        $Cache[$stableKey] = $record
+    }
+    return $record
 }
 
 $process = Get-Process KakaoWork -ErrorAction SilentlyContinue |
@@ -334,6 +451,9 @@ if ($null -eq $process) {
     throw 'KakaoWork main window was not found.'
 }
 
+# KakaoWork is brought to the foreground and maximized so its messages and
+# images render reliably for reading and capture. Each scroll re-activates this
+# window, so the computer cannot be used for other work while the export runs.
 $windowHandle = $process.MainWindowHandle
 if ([KakaoExport.Win32]::IsIconic($windowHandle)) {
     [void][KakaoExport.Win32]::ShowWindow($windowHandle, 9)  # SW_RESTORE
@@ -393,6 +513,11 @@ if (-not $SkipImages) {
 }
 $checkpointPath = Join-Path $OutputDirectory '_selected_conversation_checkpoint.json'
 
+# A stop request is signalled by creating this file (the HTA's stop button does
+# so). The export then finishes gracefully with whatever has been collected.
+$stopSignalPath = Join-Path $OutputDirectory '_stop_requested.flag'
+Remove-Item -LiteralPath $stopSignalPath -Force -ErrorAction SilentlyContinue
+
 if ($scrollPattern.Current.VerticallyScrollable) {
     $scrollPattern.SetScrollPercent(
         [Windows.Automation.ScrollPattern]::NoScroll,
@@ -403,12 +528,19 @@ if ($scrollPattern.Current.VerticallyScrollable) {
 
 $records = [Collections.Generic.List[object]]::new()
 $known = [Collections.Generic.HashSet[string]]::new()
+$recordCache = @{}
 $topStableCount = 0
 $previousCount = -1
 $scrollCount = 0
+$stopped = $false
 
 while ($scrollCount -lt $MaximumScrolls) {
-    Start-Sleep -Milliseconds 250
+    if (Test-Path -LiteralPath $stopSignalPath) {
+        Remove-Item -LiteralPath $stopSignalPath -Force -ErrorAction SilentlyContinue
+        $stopped = $true
+        break
+    }
+
     $items = $messageList.FindAll(
         [Windows.Automation.TreeScope]::Children,
         (
@@ -428,24 +560,21 @@ while ($scrollCount -lt $MaximumScrolls) {
     )
     $viewportRectangle.Intersect([Windows.Forms.SystemInformation]::VirtualScreen)
 
-    $frame = $null
-    if (-not $SkipImages -and -not $ScreenCapture) {
-        $frame = Get-WindowFrame $windowHandle
-    }
+    $frameHolder = @{ Frame = $null }
 
     $newItems = [Collections.Generic.List[object]]::new()
     try {
         for ($index = 0; $index -lt $items.Count; $index++) {
             $record = Get-MessageRecord `
-                $items.Item($index) $imageDirectory $frame $viewportRectangle
+                $items.Item($index) $imageDirectory $frameHolder $viewportRectangle $recordCache
             if ($known.Add($record.Signature)) {
                 $newItems.Add($record)
             }
         }
     }
     finally {
-        if ($null -ne $frame) {
-            $frame.Bitmap.Dispose()
+        if ($null -ne $frameHolder.Frame) {
+            $frameHolder.Frame.Bitmap.Dispose()
         }
     }
 
@@ -468,14 +597,14 @@ while ($scrollCount -lt $MaximumScrolls) {
             [Windows.Automation.ScrollAmount]::NoAmount,
             [Windows.Automation.ScrollAmount]::SmallDecrement
         )
-        Start-Sleep -Milliseconds 800
+        Start-Sleep -Milliseconds $ScrollDelayMilliseconds
     }
     else {
         $scrollPattern.Scroll(
             [Windows.Automation.ScrollAmount]::NoAmount,
             [Windows.Automation.ScrollAmount]::LargeDecrement
         )
-        Start-Sleep -Milliseconds 800
+        Start-Sleep -Milliseconds $ScrollDelayMilliseconds
     }
 
     $previousCount = $records.Count
@@ -512,6 +641,7 @@ $export = [PSCustomObject]@{
     ExportedAt = (Get-Date).ToString('o')
     RecordCount = $ordered.Count
     ReachedStableTop = ($topStableCount -ge 5)
+    StoppedEarly = $stopped
     ScrollCount = $scrollCount
     Records = $ordered
 }
@@ -591,6 +721,7 @@ Write-Progress -Activity 'Exporting KakaoWork conversation' -Completed
     DetectedConversationTitle = $detectedConversationTitle
     RecordCount = $ordered.Count
     ReachedStableTop = ($topStableCount -ge 5)
+    StoppedEarly = $stopped
     ScrollCount = $scrollCount
     JsonPath = $jsonPath
     HtmlPath = $htmlPath

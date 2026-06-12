@@ -6,11 +6,11 @@
   <HTA:APPLICATION
     ID="KakaoWorkExporter"
     APPLICATIONNAME="KakaoWork Conversation Exporter"
-    BORDER="thin"
+    BORDER="thick"
     CAPTION="yes"
-    MAXIMIZEBUTTON="no"
+    MAXIMIZEBUTTON="yes"
     MINIMIZEBUTTON="yes"
-    SCROLL="no"
+    SCROLL="auto"
     SINGLEINSTANCE="yes"
     SYSMENU="yes"
     WINDOWSTATE="normal"
@@ -90,6 +90,14 @@
       background: #f9d835;
       font-weight: 700;
     }
+    button.stop {
+      width: 100%;
+      margin-top: 8px;
+      padding: 10px;
+      background: #fbe2e0;
+      color: #c5221f;
+      font-weight: 600;
+    }
     button:disabled {
       cursor: default;
       opacity: .55;
@@ -145,6 +153,7 @@
   <script language="javascript">
     var runningProcess = null;
     var pollTimer = null;
+    var currentOutputDirectory = null;
 
     function getApplicationDirectory() {
       var path = decodeURIComponent(window.location.pathname);
@@ -229,9 +238,11 @@
       try {
         var shell = new ActiveXObject("WScript.Shell");
         runningProcess = shell.Exec(command);
+        currentOutputDirectory = outputDirectory;
         document.getElementById("startButton").disabled = true;
+        document.getElementById("stopButton").disabled = false;
         setStatus(
-          "반출 중입니다.\n카카오워크 창을 가리지 말고 다른 대화방으로 이동하지 마세요.",
+          "반출 중입니다.\n스크롤할 때마다 카카오워크가 앞으로 올라와 실행 중에는 다른 작업을 할 수 없습니다.\n카카오워크 창을 조작하거나 최소화하지 마세요.",
           ""
         );
         pollTimer = window.setInterval(checkExportStatus, 1000);
@@ -254,7 +265,9 @@
       var standardOutput = runningProcess.StdOut.ReadAll();
       var standardError = runningProcess.StdErr.ReadAll();
       runningProcess = null;
+      currentOutputDirectory = null;
       document.getElementById("startButton").disabled = false;
+      document.getElementById("stopButton").disabled = true;
 
       if (exitCode === 0) {
         setStatus(
@@ -265,6 +278,30 @@
       else {
         var detail = standardError || standardOutput || "알 수 없는 오류";
         setStatus("반출 실패\n" + detail, "error");
+      }
+    }
+
+    function requestStop() {
+      if (!runningProcess || !currentOutputDirectory) {
+        return;
+      }
+      try {
+        var fso = new ActiveXObject("Scripting.FileSystemObject");
+        if (!fso.FolderExists(currentOutputDirectory)) {
+          fso.CreateFolder(currentOutputDirectory);
+        }
+        var flagPath = currentOutputDirectory + "\\_stop_requested.flag";
+        var file = fso.CreateTextFile(flagPath, true);
+        file.WriteLine("stop");
+        file.Close();
+        document.getElementById("stopButton").disabled = true;
+        setStatus(
+          "중지를 요청했습니다.\n지금까지 수집한 내용으로 마무리하는 중입니다. 잠시만 기다려 주세요.",
+          ""
+        );
+      }
+      catch (error) {
+        setStatus("중지 요청 실패: " + error.message, "error");
       }
     }
 
@@ -280,7 +317,7 @@
     }
 
     function initialize() {
-      window.resizeTo(680, 690);
+      window.resizeTo(680, 740);
       document.getElementById("outputDirectory").value = "exports";
       document.getElementById("conversationTitle").focus();
     }
@@ -344,12 +381,21 @@
         onclick="startExport()"
       >반출 시작</button>
 
+      <button
+        id="stopButton"
+        class="stop"
+        onclick="requestStop()"
+        disabled
+      >중지</button>
+
       <div id="status" class="status">대기 중</div>
 
       <div class="warning">
-        실행 중에는 카카오워크를 최소화하거나 다른 창으로 가리지 마세요.
-        이미지 캡처와 메시지 스크롤이 끝날 때까지 다른 대화방으로 이동하지
-        않는 것이 안전합니다.
+        반출 중에는 카카오워크가 스크롤할 때마다 화면 맨 앞으로 올라오므로
+        <b>실행 중에는 컴퓨터로 다른 작업을 할 수 없습니다.</b> 자리를 비울 때
+        실행하는 것이 좋습니다. 실행 중 카카오워크 창을 직접 조작하거나 다른
+        대화방으로 이동하지 말고, <b>최소화하지 마세요.</b> <b>중지</b>를 누르면
+        지금까지 분량으로 저장하고 끝냅니다(이어하기는 지원하지 않습니다).
       </div>
     </div>
   </div>
