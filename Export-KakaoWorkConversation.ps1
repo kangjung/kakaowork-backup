@@ -327,7 +327,7 @@ function Get-MessageRecord {
     }
 }
 
-$process = Get-Process KakaoWork -ErrorAction Stop |
+$process = Get-Process KakaoWork -ErrorAction SilentlyContinue |
     Where-Object MainWindowHandle -ne 0 |
     Select-Object -First 1
 if ($null -eq $process) {

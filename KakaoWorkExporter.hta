@@ -187,8 +187,15 @@
 
       var title = document.getElementById("conversationTitle").value;
       var outputDirectory = document.getElementById("outputDirectory").value;
-      var maximumScrolls = document.getElementById("maximumScrolls").value;
+      var maximumScrolls = parseInt(
+        document.getElementById("maximumScrolls").value,
+        10
+      );
       var includeImages = document.getElementById("includeImages").checked;
+
+      if (isNaN(maximumScrolls) || maximumScrolls < 1) {
+        maximumScrolls = 500;
+      }
 
       if (!title.replace(/\s/g, "")) {
         alert("현재 열어 둔 대화방 이름을 입력하세요.");
@@ -213,7 +220,7 @@
         quoteArgument(scriptPath) +
         " -ConversationTitle " + quoteArgument(title) +
         " -OutputDirectory " + quoteArgument(outputDirectory) +
-        " -MaximumScrolls " + parseInt(maximumScrolls, 10);
+        " -MaximumScrolls " + maximumScrolls;
 
       if (!includeImages) {
         command += " -SkipImages";
