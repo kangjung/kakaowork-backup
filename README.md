@@ -192,7 +192,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File `
 | 증상 | 해결 |
 | --- | --- |
 | `KakaoWork main window was not found.` | 카카오워크를 실행하고 잠금을 해제한 뒤 다시 시도 |
-| `Open a conversation before running the exporter.` | 대화방을 하나 열어 둔 상태에서 실행 |
+| `Open a conversation before running the exporter.` | 메시지 목록을 찾지 못한 경우입니다. 카카오워크가 **잠금(PIN) 화면**이거나 **트레이로 최소화**됐거나 팝업이 떠 있으면 발생합니다. 잠금을 해제하고 메인 채팅 창을 띄운 뒤, **대화방을 하나 클릭해 메시지가 보이는 상태**에서 다시 실행하세요 |
 | 저장된 이미지가 검은색 | `-ScreenCapture` 옵션으로 재시도 (창을 가리지 말 것) |
 | 이미지 일부가 잘림 | 카카오워크 창을 최대화 (뷰포트보다 긴 이미지는 한계 있음) |
 | `mshta.exe` 차단됨 | 터미널 실행 방식 사용 |

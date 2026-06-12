@@ -322,7 +322,7 @@ function Get-MessageRecord {
             Where-Object AutomationId -eq 'translateText' |
             Select-Object -ExpandProperty Text
     ) -join "`n"
-    $otherTexts = @(
+    $rawOtherTexts = @(
         $texts |
             Where-Object {
                 $_.AutomationId -notin @(
@@ -335,6 +335,26 @@ function Get-MessageRecord {
                 )
             } |
             Select-Object -ExpandProperty Text
+    )
+    # KakaoWork timestamps (e.g. an "AM/PM h:mm" string) have no AutomationId, so
+    # they fall into this catch-all bucket, where a lone time is mis-read as a
+    # date divider and a time rendered once vs twice destabilises the de-dup
+    # signature. Detect them with an ASCII-only rule (an h:mm time inside a short
+    # string) so no Hangul literal is needed in the source - PowerShell 5.1 reads
+    # .ps1 as the system code page and would corrupt literal Hangul. Move matches
+    # to a dedicated Time field and de-duplicate the rest.
+    $isTimeText = {
+        param($value)
+        $value -match '\d{1,2}:\d{2}' -and $value.Trim().Length -le 10
+    }
+    $time = (
+        @($rawOtherTexts | Where-Object { & $isTimeText $_ }) |
+            Select-Object -Unique
+    ) -join ' '
+    $otherTexts = @(
+        $rawOtherTexts |
+            Where-Object { -not (& $isTimeText $_) } |
+            Select-Object -Unique
     )
 
     # Locate image controls without capturing yet. Their count, on-screen state
@@ -374,6 +394,7 @@ function Get-MessageRecord {
         $sender,
         $body,
         $translation,
+        $time,
         ($otherTexts -join "`n"),
         $Item.Current.Name,
         ($imageMeta -join "`n")
@@ -413,6 +434,7 @@ function Get-MessageRecord {
         $sender,
         $body,
         $translation,
+        $time,
         ($otherTexts -join "`n"),
         ($imageFiles -join "`n"),
         $Item.Current.Name
@@ -434,6 +456,7 @@ function Get-MessageRecord {
         Sender = $sender
         Body = $body
         Translation = $translation
+        Time = $time
         OtherTexts = $otherTexts
         ImageFiles = $imageFiles
     }
@@ -444,17 +467,67 @@ function Get-MessageRecord {
     return $record
 }
 
-$process = Get-Process KakaoWork -ErrorAction SilentlyContinue |
-    Where-Object MainWindowHandle -ne 0 |
-    Select-Object -First 1
-if ($null -eq $process) {
+function Get-KakaoWorkChatWindowHandle {
+    # KakaoWork has several top-level windows and the process MainWindowHandle is
+    # often NOT the chat window. Locate the window that actually contains the
+    # conversation UI instead.
+    $processIds = @(
+        Get-Process KakaoWork -ErrorAction SilentlyContinue |
+            Select-Object -ExpandProperty Id
+    )
+    if ($processIds.Count -eq 0) {
+        return [IntPtr]::Zero
+    }
+
+    $windowCondition = New-Object Windows.Automation.PropertyCondition(
+        [Windows.Automation.AutomationElement]::ControlTypeProperty,
+        [Windows.Automation.ControlType]::Window
+    )
+    $messageListCondition = New-Object Windows.Automation.PropertyCondition(
+        [Windows.Automation.AutomationElement]::AutomationIdProperty,
+        'ConversationMessageListBox'
+    )
+    $roomListCondition = New-Object Windows.Automation.PropertyCondition(
+        [Windows.Automation.AutomationElement]::AutomationIdProperty,
+        'ConversationListBox'
+    )
+
+    $desktop = [Windows.Automation.AutomationElement]::RootElement
+    $windows = $desktop.FindAll(
+        [Windows.Automation.TreeScope]::Children,
+        $windowCondition
+    )
+
+    $fallbackHandle = [IntPtr]::Zero
+    for ($index = 0; $index -lt $windows.Count; $index++) {
+        $window = $windows.Item($index)
+        if ($window.Current.ProcessId -notin $processIds) {
+            continue
+        }
+        # Prefer the window that actually holds an open conversation.
+        if ($null -ne $window.FindFirst(
+                [Windows.Automation.TreeScope]::Descendants, $messageListCondition)) {
+            return [IntPtr]$window.Current.NativeWindowHandle
+        }
+        if (
+            $fallbackHandle -eq [IntPtr]::Zero -and
+            $null -ne $window.FindFirst(
+                [Windows.Automation.TreeScope]::Descendants, $roomListCondition)
+        ) {
+            $fallbackHandle = [IntPtr]$window.Current.NativeWindowHandle
+        }
+    }
+    return $fallbackHandle
+}
+
+$windowHandle = Get-KakaoWorkChatWindowHandle
+if ($windowHandle -eq [IntPtr]::Zero) {
     throw 'KakaoWork main window was not found.'
 }
 
 # KakaoWork is brought to the foreground and maximized so its messages and
 # images render reliably for reading and capture. Each scroll re-activates this
 # window, so the computer cannot be used for other work while the export runs.
-$windowHandle = $process.MainWindowHandle
 if ([KakaoExport.Win32]::IsIconic($windowHandle)) {
     [void][KakaoExport.Win32]::ShowWindow($windowHandle, 9)  # SW_RESTORE
     Start-Sleep -Milliseconds 300
@@ -655,7 +728,7 @@ $builder = [Text.StringBuilder]::new()
 [void]$builder.AppendLine('<style>')
 [void]$builder.AppendLine('body{font-family:Segoe UI,Malgun Gothic,sans-serif;max-width:900px;margin:32px auto;padding:0 20px;background:#f5f6f8;color:#202124}')
 [void]$builder.AppendLine('.message,.system{background:white;border:1px solid #ddd;border-radius:10px;padding:10px 14px;margin:8px 0}')
-[void]$builder.AppendLine('.sender{font-weight:700}.body,.other{white-space:pre-wrap;margin-top:4px}.separator{text-align:center;color:#666;margin:20px 0}.meta{color:#777;font-size:12px}')
+[void]$builder.AppendLine('.sender{font-weight:700}.body,.other{white-space:pre-wrap;margin-top:4px}.separator{text-align:center;color:#666;margin:20px 0}.meta{color:#777;font-size:12px}.time{color:#999;font-size:11px;margin-top:4px}')
 [void]$builder.AppendLine('</style></head><body>')
 [void]$builder.AppendFormat(
     '<h1>{0}</h1><p class="meta">Exported {1} | Records {2}</p>',
@@ -706,6 +779,12 @@ foreach ($record in $ordered) {
         [void]$builder.AppendFormat(
             '<div class="other">{0}</div>',
             [Web.HttpUtility]::HtmlEncode(($record.OtherTexts -join "`n"))
+        )
+    }
+    if ($record.Time) {
+        [void]$builder.AppendFormat(
+            '<div class="time">{0}</div>',
+            [Web.HttpUtility]::HtmlEncode($record.Time)
         )
     }
     [void]$builder.AppendLine('</div>')
