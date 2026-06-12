@@ -6,3 +6,4 @@ test-export/
 *.db-wal
 UserSettings.ini
 _selected_conversation_checkpoint.json
+.idea/
