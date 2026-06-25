@@ -1,0 +1,1441 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>KakaoWork Backup Viewer</title>
+  <style>
+    :root {
+      --yellow: #fee500;
+      --ink: #202124;
+      --muted: #6f737b;
+      --line: #dfe3e8;
+      --bg: #f4f5f7;
+      --bubble: #ffffff;
+      --bubble-me: #fff4b8;
+      --soft: #eef1f5;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: "Segoe UI", "Malgun Gothic", sans-serif;
+      font-size: 14px;
+    }
+
+    button, input { font: inherit; }
+
+    .app {
+      display: grid;
+      grid-template-columns: 72px 340px minmax(0, 1fr);
+      min-height: 100vh;
+    }
+
+    .app.sidebar-collapsed {
+      grid-template-columns: 72px 0 minmax(0, 1fr);
+    }
+
+    .rail {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      min-height: 100vh;
+      padding: 18px 10px;
+      border-right: 1px solid #edf0f3;
+      background: #fff;
+    }
+
+    .rail-button {
+      display: grid;
+      place-items: center;
+      width: 44px;
+      height: 44px;
+      border: 0;
+      border-radius: 50%;
+      background: transparent;
+      color: #8d96a3;
+      font-size: 22px;
+      cursor: pointer;
+    }
+
+    .rail-button.active {
+      background: #e5f2ff;
+      color: #1683f5;
+    }
+
+    .rail-spacer {
+      flex: 1;
+    }
+
+    .sidebar {
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+      border-right: 1px solid #edf0f3;
+      background: #fff;
+      color: var(--ink);
+      overflow: hidden;
+    }
+
+    .app.sidebar-collapsed .sidebar {
+      border-right: 0;
+    }
+
+    .app.sidebar-collapsed .sidebar > * {
+      display: none;
+    }
+
+    .brand {
+      padding: 18px 18px 14px;
+      border-bottom: 1px solid #edf0f3;
+    }
+
+    .brand-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .brand h1 {
+      margin: 0;
+      font-size: 20px;
+      line-height: 1.25;
+    }
+
+    .collapse-button {
+      flex: 0 0 auto;
+      width: 32px;
+      height: 32px;
+      border: 1px solid #d8dde3;
+      border-radius: 50%;
+      background: #fff;
+      color: #6f737b;
+      cursor: pointer;
+    }
+
+    .brand p {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .primary {
+      width: 100%;
+      min-height: 42px;
+      border: 0;
+      border-radius: 6px;
+      background: var(--yellow);
+      color: #191919;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .secondary {
+      width: 100%;
+      min-height: 38px;
+      margin-top: 8px;
+      border: 1px solid #d8dde3;
+      border-radius: 6px;
+      background: #fff;
+      color: var(--ink);
+      cursor: pointer;
+    }
+
+    .status {
+      min-height: 36px;
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+      white-space: pre-wrap;
+    }
+
+    .room-list {
+      flex: 1;
+      min-height: 0;
+      overflow: auto;
+      padding: 8px;
+    }
+
+    .sidebar-actions {
+      padding: 12px 14px 14px;
+      border-top: 1px solid #edf0f3;
+      background: #fff;
+    }
+
+    .room-button {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 6px;
+      width: 100%;
+      min-height: 58px;
+      margin: 2px 0;
+      padding: 10px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--ink);
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .room-button:hover,
+    .room-button.active {
+      background: #edf4fb;
+    }
+
+    .room-title {
+      overflow: hidden;
+      font-weight: 700;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .room-meta {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .room-count {
+      align-self: center;
+      min-width: 28px;
+      padding: 2px 7px;
+      border-radius: 999px;
+      background: #e6f2ff;
+      color: #1683f5;
+      font-size: 12px;
+      text-align: center;
+    }
+
+    .main {
+      display: grid;
+      grid-template-rows: auto 1fr;
+      min-width: 0;
+      min-height: 100vh;
+    }
+
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      display: grid;
+      grid-template-columns: minmax(220px, 320px) minmax(0, 1fr);
+      gap: 16px;
+      align-items: center;
+      min-height: 74px;
+      padding: 14px 20px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(244, 245, 247, .96);
+      backdrop-filter: blur(12px);
+    }
+
+    .current h2 {
+      overflow: hidden;
+      margin: 0;
+      font-size: 21px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .current p {
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .search {
+      width: 100%;
+      min-height: 40px;
+      padding: 0 12px;
+      border: 0;
+      border-left: 1px solid #e2e6eb;
+      border-right: 1px solid #e2e6eb;
+      border-radius: 0;
+      background: #fff;
+      color: var(--ink);
+      outline: 0;
+    }
+
+    .search-bar {
+      display: grid;
+      grid-template-columns: auto minmax(360px, 1fr) auto auto;
+      overflow: hidden;
+      min-width: 0;
+      min-height: 42px;
+      border: 1px solid #c8cdd4;
+      border-radius: 8px;
+      background: #fff;
+    }
+
+    .scope-toggle {
+      display: grid;
+      grid-template-columns: auto auto;
+      overflow: hidden;
+      min-height: 40px;
+      background: #fff;
+    }
+
+    .scope-button {
+      min-width: 70px;
+      border: 0;
+      border-right: 1px solid #e2e6eb;
+      background: transparent;
+      color: #5f6670;
+      cursor: pointer;
+    }
+
+    .scope-button:last-child {
+      border-right: 0;
+    }
+
+    .scope-button.active {
+      background: #edf4fb;
+      color: #126fd1;
+      font-weight: 700;
+    }
+
+    .search-button,
+    .clear-button {
+      min-height: 40px;
+      padding: 0 14px;
+      border-radius: 0;
+      cursor: pointer;
+    }
+
+    .search-button {
+      border: 0;
+      background: #2f343d;
+      color: #fff;
+      font-weight: 700;
+    }
+
+    .clear-button {
+      border: 0;
+      border-left: 1px solid #e2e6eb;
+      background: #fff;
+      color: var(--ink);
+    }
+
+    .content {
+      min-height: 0;
+      padding: 20px;
+    }
+
+    .empty {
+      max-width: 660px;
+      margin: 72px auto;
+      color: var(--muted);
+      text-align: center;
+      line-height: 1.7;
+    }
+
+    .workspace {
+      display: grid;
+      grid-template-columns: minmax(260px, 360px) minmax(0, 1fr);
+      gap: 16px;
+      height: calc(100vh - 114px);
+      min-height: 480px;
+    }
+
+    .workspace.results-collapsed {
+      grid-template-columns: 44px minmax(0, 1fr);
+    }
+
+    .workspace.timeline-collapsed {
+      grid-template-columns: minmax(260px, 1fr) 44px;
+    }
+
+    .results-panel,
+    .timeline-panel {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      overflow: hidden;
+    }
+
+    .workspace.results-collapsed .results-panel {
+      border: 1px solid var(--line);
+    }
+
+    .workspace.results-collapsed .results-panel .result-list,
+    .workspace.results-collapsed .results-panel #resultTitle {
+      display: none;
+    }
+
+    .workspace.timeline-collapsed .timeline-panel {
+      border: 1px solid rgba(0, 0, 0, .08);
+    }
+
+    .workspace.timeline-collapsed .timeline-panel .timeline,
+    .workspace.timeline-collapsed .timeline-panel #timelineTitle {
+      display: none;
+    }
+
+    .workspace.results-collapsed .results-panel .panel-head,
+    .workspace.timeline-collapsed .timeline-panel .panel-head {
+      justify-content: center;
+      padding: 8px 6px;
+    }
+
+    .timeline-panel {
+      background: #b9cde0;
+    }
+
+    .panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      min-height: 48px;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line);
+      font-weight: 700;
+    }
+
+    .panel-collapse {
+      flex: 0 0 auto;
+      width: 30px;
+      height: 30px;
+      border: 1px solid #d8dde3;
+      border-radius: 50%;
+      background: #fff;
+      color: #6f737b;
+      cursor: pointer;
+    }
+
+    .timeline-panel .panel-collapse {
+      border-color: rgba(255, 255, 255, .55);
+      background: rgba(255, 255, 255, .2);
+      color: #fff;
+    }
+
+    .timeline-panel .panel-head {
+      border-color: rgba(0, 0, 0, .08);
+      color: #fff;
+    }
+
+    .result-list,
+    .timeline {
+      flex: 1;
+      min-height: 0;
+      overflow: auto;
+      padding: 12px;
+    }
+
+    .timeline {
+      background: #b9cde0;
+    }
+
+    .result-item {
+      width: 100%;
+      margin: 0 0 8px;
+      padding: 10px;
+      border: 1px solid #d7dce3;
+      border-left: 4px solid #4a90e2;
+      border-radius: 6px;
+      background: #fff;
+      color: var(--ink);
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .result-item:hover,
+    .result-item.active {
+      background: #eef5ff;
+    }
+
+    .result-room {
+      margin-bottom: 4px;
+      color: #2468b2;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .result-meta {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 5px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .result-body {
+      display: -webkit-box;
+      overflow: hidden;
+      color: #333;
+      font-size: 13px;
+      line-height: 1.45;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+    }
+
+    .empty strong {
+      display: block;
+      margin-bottom: 8px;
+      color: var(--ink);
+      font-size: 19px;
+    }
+
+    .day {
+      margin: 24px 0 16px;
+      color: var(--muted);
+      font-size: 12px;
+      text-align: center;
+    }
+
+    .message {
+      display: grid;
+      grid-template-columns: minmax(0, 680px);
+      margin: 8px 0;
+    }
+
+    .message.me {
+      justify-content: end;
+    }
+
+    .message.other {
+      justify-content: start;
+    }
+
+    .bubble {
+      width: fit-content;
+      max-width: min(680px, 100%);
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--bubble);
+      box-shadow: 0 1px 1px rgba(0, 0, 0, .03);
+    }
+
+    .message.me .bubble {
+      background: var(--bubble-me);
+      border-color: #eadc99;
+    }
+
+    .message.target .bubble {
+      animation: flash 1.3s ease-in-out 2;
+      outline: 2px solid #ff5c5c;
+    }
+
+    .sender {
+      margin-bottom: 5px;
+      font-weight: 700;
+    }
+
+    .body,
+    .other {
+      line-height: 1.55;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .translation {
+      margin-top: 7px;
+      padding-top: 7px;
+      border-top: 1px solid rgba(0, 0, 0, .08);
+      color: #4d5156;
+      line-height: 1.55;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .time {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .system {
+      margin: 16px 0;
+      color: var(--muted);
+      font-size: 12px;
+      text-align: center;
+    }
+
+    .image-list {
+      display: grid;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .image-list img {
+      display: block;
+      max-width: min(420px, 100%);
+      height: auto;
+      border-radius: 6px;
+      border: 1px solid rgba(0, 0, 0, .08);
+      background: #fff;
+    }
+
+    .missing-image {
+      margin-top: 8px;
+      padding: 8px 10px;
+      border-radius: 6px;
+      background: var(--soft);
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .hidden-input { display: none; }
+
+
+    mark {
+      padding: 0 2px;
+      border-radius: 3px;
+      background: #ffed77;
+      color: inherit;
+    }
+
+    @keyframes flash {
+      0%, 100% { filter: brightness(1); }
+      50% { filter: brightness(1.12); }
+    }
+
+    @media (max-width: 820px) {
+      .app { grid-template-columns: 1fr; }
+      .rail { display: none; }
+      .sidebar { min-height: auto; }
+      .room-list {
+        display: flex;
+        gap: 6px;
+        overflow-x: auto;
+        padding: 8px 10px 12px;
+      }
+      .room-button { min-width: 220px; }
+      .topbar { grid-template-columns: 1fr; }
+      .search-bar { grid-template-columns: 1fr; }
+      .search {
+        border-top: 1px solid #e2e6eb;
+        border-bottom: 1px solid #e2e6eb;
+        border-left: 0;
+        border-right: 0;
+      }
+      .scope-toggle {
+        grid-template-columns: 1fr 1fr;
+      }
+      .clear-button {
+        border-left: 0;
+        border-top: 1px solid #e2e6eb;
+      }
+      .workspace {
+        grid-template-columns: 1fr;
+        height: auto;
+      }
+      .results-panel,
+      .timeline-panel {
+        min-height: 360px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app" id="appShell">
+    <nav class="rail" aria-label="앱 메뉴">
+      <button class="rail-button active" id="railChatButton" type="button" title="채팅">●</button>
+      <button class="rail-button" id="railSearchButton" type="button" title="검색">⌕</button>
+      <button class="rail-button" id="railFileButton" type="button" title="백업 파일">▤</button>
+      <div class="rail-spacer"></div>
+      <button class="rail-button" id="settingsButton" type="button" title="설정">⚙</button>
+    </nav>
+
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-row">
+          <h1>채팅</h1>
+          <button class="collapse-button" id="collapseSidebarButton" type="button" title="채팅방 목록 접기">‹</button>
+        </div>
+        <p id="status">아래 버튼으로 백업 폴더를 불러오세요.</p>
+      </div>
+      <div class="room-list" id="roomList"></div>
+      <div class="sidebar-actions" id="backupActions">
+        <button class="primary" id="pickDirectoryButton" type="button">백업 폴더 선택</button>
+        <button class="secondary" id="pickFilesButton" type="button">JSON 파일 선택</button>
+        <input class="hidden-input" id="directoryInput" type="file" webkitdirectory multiple>
+        <input class="hidden-input" id="fileInput" type="file" accept=".json,application/json" multiple>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="current">
+          <h2 id="currentTitle">백업 폴더를 선택하세요</h2>
+          <p id="currentMeta">프로젝트 폴더, exports 폴더, 또는 백업을 모아 둔 상위 폴더를 선택할 수 있습니다.</p>
+        </div>
+        <div class="search-bar">
+          <div class="scope-toggle" aria-label="검색 범위">
+            <button class="scope-button active" id="scopeRoomButton" type="button">현재 방</button>
+            <button class="scope-button" id="scopeAllButton" type="button">전체</button>
+          </div>
+          <input class="search" id="searchInput" type="search" placeholder="대화방, 발신자, 메시지 검색">
+          <button class="search-button" id="searchButton" type="button">검색</button>
+          <button class="clear-button" id="clearSearchButton" type="button">초기화</button>
+        </div>
+      </header>
+      <section class="content" id="content">
+        <div class="empty">
+          <strong>여러 대화방을 한 번에 볼 수 있습니다.</strong>
+          왼쪽 채팅방 목록 아래에서 JSON 파일과 `_images` 폴더가 들어 있는 백업 폴더를 선택하세요.
+          브라우저 보안상 사용자가 선택한 폴더만 읽을 수 있습니다.
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const state = {
+      rooms: [],
+      selectedId: '',
+      query: '',
+      activeMessageId: '',
+      searchScope: 'room',
+      sidebarCollapsed: false,
+      resultsCollapsed: false,
+      timelineCollapsed: false,
+      restoredDirectory: false,
+      imageFiles: new Map(),
+      imageUrls: new Map(),
+      resultLimit: 500
+    };
+
+    const roomList = document.getElementById('roomList');
+    const appShell = document.getElementById('appShell');
+    const content = document.getElementById('content');
+    const statusBox = document.getElementById('status');
+    const currentTitle = document.getElementById('currentTitle');
+    const currentMeta = document.getElementById('currentMeta');
+    const searchInput = document.getElementById('searchInput');
+    const searchButton = document.getElementById('searchButton');
+    const clearSearchButton = document.getElementById('clearSearchButton');
+    const scopeRoomButton = document.getElementById('scopeRoomButton');
+    const scopeAllButton = document.getElementById('scopeAllButton');
+    const directoryInput = document.getElementById('directoryInput');
+    const fileInput = document.getElementById('fileInput');
+    const backupActions = document.getElementById('backupActions');
+    const settingsButton = document.getElementById('settingsButton');
+    const railChatButton = document.getElementById('railChatButton');
+    const railSearchButton = document.getElementById('railSearchButton');
+    const railFileButton = document.getElementById('railFileButton');
+    const collapseSidebarButton = document.getElementById('collapseSidebarButton');
+
+    railChatButton.addEventListener('click', () => {
+      state.sidebarCollapsed = !state.sidebarCollapsed;
+      updateLayoutControls();
+    });
+
+    collapseSidebarButton.addEventListener('click', () => {
+      state.sidebarCollapsed = true;
+      updateLayoutControls();
+    });
+
+    settingsButton.addEventListener('click', showBackupActions);
+
+    railFileButton.addEventListener('click', showBackupActions);
+
+    railSearchButton.addEventListener('click', () => {
+      searchInput.focus();
+    });
+
+    document.getElementById('pickDirectoryButton').addEventListener('click', async () => {
+      if (window.showDirectoryPicker) {
+        await loadWithDirectoryPicker();
+        return;
+      }
+      directoryInput.click();
+    });
+
+    document.getElementById('pickFilesButton').addEventListener('click', () => {
+      fileInput.click();
+    });
+
+    directoryInput.addEventListener('change', async (event) => {
+      await loadFromFiles(Array.from(event.target.files));
+      event.target.value = '';
+    });
+
+    fileInput.addEventListener('change', async (event) => {
+      await loadFromFiles(Array.from(event.target.files));
+      event.target.value = '';
+    });
+
+    searchButton.addEventListener('click', runSearch);
+
+    scopeRoomButton.addEventListener('click', () => {
+      state.searchScope = 'room';
+      updateScopeButtons();
+      if (state.query) {
+        render();
+      }
+    });
+
+    scopeAllButton.addEventListener('click', () => {
+      state.searchScope = 'all';
+      updateScopeButtons();
+      if (state.query) {
+        render();
+      }
+    });
+
+    clearSearchButton.addEventListener('click', () => {
+      searchInput.value = '';
+      state.query = '';
+      state.activeMessageId = '';
+      render();
+    });
+
+    searchInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        runSearch();
+      }
+    });
+
+    restoreSavedDirectory();
+
+    function runSearch() {
+      state.query = searchInput.value.trim().toLowerCase();
+      state.activeMessageId = '';
+      render();
+    }
+
+    async function loadWithDirectoryPicker() {
+      try {
+        setStatus('폴더를 읽는 중입니다...');
+        const root = await window.showDirectoryPicker();
+        await saveDirectoryHandle(root);
+        const files = [];
+        await collectDirectoryEntries(root, '', files);
+        await loadFromFiles(files);
+      } catch (error) {
+        if (error && error.name === 'AbortError') {
+          setStatus('폴더 선택이 취소되었습니다.');
+          return;
+        }
+        setStatus('폴더를 읽지 못했습니다: ' + error.message);
+      }
+    }
+
+    async function restoreSavedDirectory() {
+      if (!window.showDirectoryPicker || !window.indexedDB) {
+        return;
+      }
+
+      try {
+        const handle = await getSavedDirectoryHandle();
+        if (!handle) {
+          return;
+        }
+
+        const allowed = await requestDirectoryPermission(handle);
+        if (!allowed) {
+          setStatus('이전 백업 폴더 권한이 없어 다시 선택해야 합니다.');
+          return;
+        }
+
+        state.restoredDirectory = true;
+        setStatus('이전 백업 폴더를 다시 읽는 중입니다...');
+        const files = [];
+        await collectDirectoryEntries(handle, '', files);
+        await loadFromFiles(files);
+      } catch (error) {
+        console.warn('Saved directory restore failed', error);
+        setStatus('이전 백업 폴더를 자동으로 읽지 못했습니다. 백업 폴더를 다시 선택하세요.');
+      }
+    }
+
+    async function requestDirectoryPermission(handle) {
+      if (!handle || !handle.queryPermission || !handle.requestPermission) {
+        return false;
+      }
+      const options = { mode: 'read' };
+      if ((await handle.queryPermission(options)) === 'granted') {
+        return true;
+      }
+      return (await handle.requestPermission(options)) === 'granted';
+    }
+
+    async function saveDirectoryHandle(handle) {
+      if (!window.indexedDB) {
+        return;
+      }
+      try {
+        const db = await openViewerDb();
+        await putStoreValue(db, 'directoryHandle', handle);
+      } catch (error) {
+        console.warn('Directory handle save failed', error);
+      }
+    }
+
+    async function getSavedDirectoryHandle() {
+      const db = await openViewerDb();
+      return getStoreValue(db, 'directoryHandle');
+    }
+
+    function openViewerDb() {
+      return new Promise((resolve, reject) => {
+        const request = indexedDB.open('kakaowork-backup-viewer', 1);
+        request.onupgradeneeded = () => {
+          request.result.createObjectStore('settings');
+        };
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+    }
+
+    function putStoreValue(db, key, value) {
+      return new Promise((resolve, reject) => {
+        const transaction = db.transaction('settings', 'readwrite');
+        transaction.objectStore('settings').put(value, key);
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+      });
+    }
+
+    function getStoreValue(db, key) {
+      return new Promise((resolve, reject) => {
+        const transaction = db.transaction('settings', 'readonly');
+        const request = transaction.objectStore('settings').get(key);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+    }
+
+    async function collectDirectoryEntries(handle, prefix, files) {
+      for await (const [name, child] of handle.entries()) {
+        const relativePath = prefix ? prefix + '/' + name : name;
+        if (child.kind === 'directory') {
+          await collectDirectoryEntries(child, relativePath, files);
+          continue;
+        }
+        const file = await child.getFile();
+        Object.defineProperty(file, 'viewerRelativePath', {
+          value: relativePath,
+          configurable: true
+        });
+        files.push(file);
+      }
+    }
+
+    async function loadFromFiles(files) {
+      resetObjectUrls();
+      state.rooms = [];
+      state.selectedId = '';
+      state.imageFiles = new Map();
+      state.imageUrls = new Map();
+      setStatus('파일을 분석하는 중입니다...');
+
+      const jsonFiles = [];
+      for (const file of files) {
+        const path = getRelativePath(file);
+        const lower = path.toLowerCase();
+        if (lower.endsWith('.json') && !lower.endsWith('_checkpoint.json')) {
+          jsonFiles.push({ file, path: normalizePath(path) });
+        } else if (/\.(png|jpe?g|gif|webp|bmp)$/i.test(lower)) {
+          state.imageFiles.set(normalizePath(path), file);
+        }
+      }
+
+      const rooms = [];
+      for (const item of jsonFiles) {
+        try {
+          const text = await item.file.text();
+          const data = JSON.parse(text);
+          const room = normalizeExport(data, item.path);
+          if (room) {
+            rooms.push(room);
+          }
+        } catch (error) {
+          console.warn('JSON parse failed', item.path, error);
+        }
+      }
+
+      rooms.sort((a, b) => {
+        const left = Date.parse(b.exportedAt || '') || 0;
+        const right = Date.parse(a.exportedAt || '') || 0;
+        return left - right || a.title.localeCompare(b.title, 'ko');
+      });
+
+      state.rooms = rooms;
+      if (rooms.length > 0) {
+        state.selectedId = rooms[0].id;
+      }
+
+      setStatus(`${rooms.length}개 대화방, ${state.imageFiles.size}개 이미지 파일을 읽었습니다.`);
+      render();
+    }
+
+    function normalizeExport(data, jsonPath) {
+      if (!data || !Array.isArray(data.Records)) {
+        return null;
+      }
+
+      const title = data.ConversationTitle || data.DetectedConversationTitle || basename(jsonPath, '.json');
+      const dir = dirname(jsonPath);
+      const base = basename(jsonPath, '.json');
+      const imageDir = joinPath(dir, base + '_images');
+      const records = data.Records.map((record, index) => {
+        const imageFiles = Array.isArray(record.ImageFiles) ? record.ImageFiles : [];
+        return {
+          id: `${jsonPath}:${index}`,
+          roomTitle: title,
+          kind: record.Kind || 'message',
+          sender: record.Sender || '',
+          body: record.Body || '',
+          translation: record.Translation || '',
+          time: record.Time || '',
+          otherTexts: Array.isArray(record.OtherTexts) ? record.OtherTexts : [],
+          imagePaths: imageFiles.map((name) => joinPath(imageDir, String(name).replace(/\\/g, '/')))
+        };
+      });
+
+      return {
+        id: jsonPath,
+        path: jsonPath,
+        title,
+        exportedAt: data.ExportedAt || '',
+        recordCount: Number(data.RecordCount || records.length),
+        scrollCount: data.ScrollCount,
+        stoppedEarly: Boolean(data.StoppedEarly),
+        records
+      };
+    }
+
+    function render() {
+      updateLayoutControls();
+      renderRooms();
+      renderMessages();
+    }
+
+    function renderRooms() {
+      roomList.innerHTML = '';
+      for (const room of state.rooms) {
+        roomList.appendChild(roomButton({
+          id: room.id,
+          title: room.title,
+          meta: formatDate(room.exportedAt) || room.path,
+          count: room.records.length
+        }));
+      }
+    }
+
+    function roomButton(room) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'room-button' + (state.selectedId === room.id ? ' active' : '');
+      button.addEventListener('click', () => {
+        state.selectedId = room.id;
+        state.activeMessageId = '';
+        render();
+      });
+      button.innerHTML = `
+        <span>
+          <span class="room-title">${escapeHtml(room.title)}</span>
+          <span class="room-meta">${escapeHtml(room.meta)}</span>
+        </span>
+        <span class="room-count">${room.count}</span>
+      `;
+      return button;
+    }
+
+    function renderMessages() {
+      const timelineRooms = selectedRooms();
+      const resultRooms = state.query && state.searchScope === 'all'
+        ? state.rooms
+        : timelineRooms;
+      const timelineItems = [];
+      const resultItems = [];
+      for (const room of timelineRooms) {
+        for (const record of room.records) {
+          timelineItems.push({ room, record });
+        }
+      }
+      for (const room of resultRooms) {
+        for (const record of room.records) {
+          if (matchesQuery(room, record)) {
+            resultItems.push({ room, record });
+          }
+        }
+      }
+
+      updateHeader(timelineRooms, timelineItems.length, resultItems.length);
+
+      if (state.rooms.length === 0) {
+        content.innerHTML = `
+          <div class="empty">
+            <strong>백업 폴더를 선택하세요.</strong>
+            왼쪽 채팅방 목록 아래에서 백업 폴더를 선택하면 대화방 목록이 표시됩니다.
+          </div>
+        `;
+        return;
+      }
+
+      content.innerHTML = `
+        <div class="workspace${state.resultsCollapsed ? ' results-collapsed' : ''}${state.timelineCollapsed ? ' timeline-collapsed' : ''}">
+          <section class="results-panel">
+            <div class="panel-head">
+              <span id="resultTitle"></span>
+              <button class="panel-collapse" id="toggleResultsButton" type="button" title="검색 결과 접기">‹</button>
+            </div>
+            <div class="result-list" id="resultList"></div>
+          </section>
+          <section class="timeline-panel">
+            <div class="panel-head">
+              <span id="timelineTitle"></span>
+              <button class="panel-collapse" id="toggleChatButton" type="button" title="대화 접기">›</button>
+            </div>
+            <div class="timeline" id="timeline"></div>
+          </section>
+        </div>
+      `;
+      bindPanelCollapseButtons();
+
+      renderSearchResults(resultItems);
+      renderTimeline(timelineItems);
+    }
+
+    function renderSearchResults(resultItems) {
+      const resultTitle = document.getElementById('resultTitle');
+      const resultList = document.getElementById('resultList');
+      if (!state.query) {
+        resultTitle.textContent = '검색 결과';
+        resultList.innerHTML = `
+          <div class="empty" style="margin:40px auto">
+            <strong>검색어를 입력하세요.</strong>
+            범위를 고른 뒤 검색하면 결과가 여기에 표시됩니다.
+          </div>
+        `;
+        return;
+      }
+
+      resultTitle.textContent = `${resultItems.length.toLocaleString()}건 발견`;
+      if (resultItems.length === 0) {
+        resultList.innerHTML = `
+          <div class="empty" style="margin:40px auto">
+            <strong>검색 결과가 없습니다.</strong>
+            검색어를 바꾸거나 검색 범위를 전체로 바꿔보세요.
+          </div>
+        `;
+        return;
+      }
+
+      const fragment = document.createDocumentFragment();
+      const visibleResults = resultItems.slice(0, state.resultLimit);
+      if (resultItems.length > state.resultLimit) {
+        const notice = document.createElement('div');
+        notice.className = 'missing-image';
+        notice.textContent = `결과가 많아 처음 ${state.resultLimit.toLocaleString()}건만 표시합니다. 검색어를 더 구체적으로 입력하세요.`;
+        fragment.appendChild(notice);
+      }
+      for (const item of visibleResults) {
+        fragment.appendChild(resultElement(item.room, item.record));
+      }
+
+      resultList.innerHTML = '';
+      resultList.appendChild(fragment);
+    }
+
+    function renderTimeline(timelineItems) {
+      const timelineTitle = document.getElementById('timelineTitle');
+      const timeline = document.getElementById('timeline');
+      timelineTitle.textContent = `대화 타임라인 (${timelineItems.length.toLocaleString()}개 메시지)`;
+
+      if (timelineItems.length === 0) {
+        timeline.innerHTML = `
+          <div class="empty" style="margin:40px auto">
+            <strong>대화방을 선택하세요.</strong>
+            왼쪽 채팅방 목록에서 볼 대화방을 고르세요.
+          </div>
+        `;
+        return;
+      }
+
+      const fragment = document.createDocumentFragment();
+      for (const item of timelineItems) {
+        fragment.appendChild(messageElement(item.record, item.room));
+      }
+
+      timeline.innerHTML = '';
+      timeline.appendChild(fragment);
+    }
+
+    function updateHeader(rooms, totalCount, resultCount) {
+      if (state.rooms.length === 0) {
+        currentTitle.textContent = '백업 폴더를 선택하세요';
+        currentMeta.textContent = '프로젝트 폴더, exports 폴더, 또는 백업을 모아 둔 상위 폴더를 선택할 수 있습니다.';
+        return;
+      }
+
+      const room = rooms[0];
+      currentTitle.textContent = room ? room.title : '대화방을 선택하세요';
+      currentMeta.textContent = room
+        ? `${formatDate(room.exportedAt) || '반출 일시 없음'} · 전체 ${totalCount}개${state.query ? ` · ${state.searchScope === 'all' ? '전체 검색' : '현재 방 검색'} ${resultCount}건` : ''} · ${room.path}`
+        : `${state.rooms.length}개 대화방을 불러왔습니다.`;
+    }
+
+    function resultElement(room, record) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'result-item' + (state.activeMessageId === record.id ? ' active' : '');
+      button.addEventListener('click', () => {
+        if (state.selectedId !== room.id) {
+          state.selectedId = room.id;
+        }
+        state.activeMessageId = record.id;
+        render();
+        requestAnimationFrame(() => scrollToMessage(record.id));
+      });
+      const sender = record.sender || '나';
+      const body = record.body || record.translation || record.otherTexts.join(' ') || '(내용 없음)';
+      button.innerHTML = `
+        <div class="result-room">${escapeHtml(room.title)}</div>
+        <div class="result-meta">
+          <span>${highlight(sender)}</span>
+          <span>${escapeHtml(record.time)}</span>
+        </div>
+        <div class="result-body">${highlight(body)}</div>
+      `;
+      return button;
+    }
+
+    function messageElement(record, room) {
+      if (record.kind === 'separator') {
+        const separator = document.createElement('div');
+        separator.className = 'system';
+        separator.innerHTML = record.otherTexts.length > 0
+          ? highlight(record.otherTexts.join(' '))
+          : escapeHtml(record.time || '구분선');
+        return separator;
+      }
+
+      const wrapper = document.createElement('article');
+      wrapper.className = 'message ' + (record.sender ? 'other' : 'me');
+      if (state.activeMessageId === record.id) {
+        wrapper.className += ' target';
+      }
+      wrapper.id = messageDomId(record.id);
+      wrapper.dataset.room = room.title;
+      const bubble = document.createElement('div');
+      bubble.className = 'bubble';
+
+      if (record.sender) {
+        appendHtml(bubble, 'div', 'sender', highlight(record.sender));
+      }
+      if (record.body) {
+        appendHtml(bubble, 'div', 'body', highlight(record.body));
+      }
+      if (record.translation) {
+        appendHtml(bubble, 'div', 'translation', highlight(record.translation));
+      }
+      if (record.otherTexts.length > 0) {
+        appendHtml(bubble, 'div', 'other', highlight(record.otherTexts.join('\n')));
+      }
+      appendImages(bubble, record.imagePaths);
+      if (record.time) {
+        appendHtml(bubble, 'div', 'time', escapeHtml(record.time));
+      }
+
+      wrapper.appendChild(bubble);
+      return wrapper;
+    }
+
+    function scrollToMessage(recordId) {
+      const target = document.getElementById(messageDomId(recordId));
+      if (!target) {
+        return;
+      }
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    function appendImages(parent, imagePaths) {
+      if (!imagePaths || imagePaths.length === 0) {
+        return;
+      }
+
+      const list = document.createElement('div');
+      list.className = 'image-list';
+      for (const imagePath of imagePaths) {
+        const file = state.imageFiles.get(normalizePath(imagePath));
+        if (!file) {
+          const missing = document.createElement('div');
+          missing.className = 'missing-image';
+          missing.textContent = '이미지 파일을 찾지 못했습니다: ' + imagePath;
+          list.appendChild(missing);
+          continue;
+        }
+        const image = document.createElement('img');
+        image.loading = 'lazy';
+        image.alt = 'KakaoWork image';
+        image.src = objectUrlFor(imagePath, file);
+        list.appendChild(image);
+      }
+      parent.appendChild(list);
+    }
+
+    function appendHtml(parent, tagName, className, html) {
+      const element = document.createElement(tagName);
+      element.className = className;
+      element.innerHTML = html;
+      parent.appendChild(element);
+    }
+
+    function matchesQuery(room, record) {
+      if (!state.query) {
+        return true;
+      }
+      const haystack = [
+        room.title,
+        record.sender,
+        record.body,
+        record.translation,
+        record.otherTexts.join(' ')
+      ].join(' ').toLowerCase();
+      return haystack.includes(state.query);
+    }
+
+    function selectedRooms() {
+      return state.rooms.filter((room) => room.id === state.selectedId);
+    }
+
+    function updateScopeButtons() {
+      scopeRoomButton.classList.toggle('active', state.searchScope === 'room');
+      scopeAllButton.classList.toggle('active', state.searchScope === 'all');
+    }
+
+    function updateLayoutControls() {
+      appShell.classList.toggle('sidebar-collapsed', state.sidebarCollapsed);
+      railChatButton.title = state.sidebarCollapsed ? '채팅방 목록 열기' : '채팅방 목록 접기';
+    }
+
+    function bindPanelCollapseButtons() {
+      const resultButton = document.getElementById('toggleResultsButton');
+      const chatButton = document.getElementById('toggleChatButton');
+      if (resultButton) {
+        resultButton.textContent = state.resultsCollapsed ? '›' : '‹';
+        resultButton.title = state.resultsCollapsed ? '검색 결과 열기' : '검색 결과 접기';
+        resultButton.addEventListener('click', () => {
+          state.resultsCollapsed = !state.resultsCollapsed;
+          if (state.resultsCollapsed && state.timelineCollapsed) {
+            state.timelineCollapsed = false;
+          }
+          render();
+        });
+      }
+      if (chatButton) {
+        chatButton.textContent = state.timelineCollapsed ? '‹' : '›';
+        chatButton.title = state.timelineCollapsed ? '대화 열기' : '대화 접기';
+        chatButton.addEventListener('click', () => {
+          state.timelineCollapsed = !state.timelineCollapsed;
+          if (state.timelineCollapsed && state.resultsCollapsed) {
+            state.resultsCollapsed = false;
+          }
+          render();
+        });
+      }
+    }
+
+    function showBackupActions() {
+      state.sidebarCollapsed = false;
+      updateLayoutControls();
+      backupActions.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }
+
+    function highlight(value) {
+      const escaped = escapeHtml(value || '');
+      if (!state.query) {
+        return escaped;
+      }
+      const pattern = escapeRegExp(state.query);
+      return escaped.replace(new RegExp(pattern, 'gi'), (match) => `<mark>${match}</mark>`);
+    }
+
+    function objectUrlFor(path, file) {
+      const key = normalizePath(path);
+      if (!state.imageUrls.has(key)) {
+        state.imageUrls.set(key, URL.createObjectURL(file));
+      }
+      return state.imageUrls.get(key);
+    }
+
+    function resetObjectUrls() {
+      for (const url of state.imageUrls.values()) {
+        URL.revokeObjectURL(url);
+      }
+      state.imageUrls.clear();
+    }
+
+    function getRelativePath(file) {
+      return file.viewerRelativePath || file.webkitRelativePath || file.name;
+    }
+
+    function normalizePath(path) {
+      return String(path || '').replace(/\\/g, '/').replace(/^\/+/, '');
+    }
+
+    function dirname(path) {
+      const normalized = normalizePath(path);
+      const index = normalized.lastIndexOf('/');
+      return index === -1 ? '' : normalized.slice(0, index);
+    }
+
+    function basename(path, extension) {
+      const normalized = normalizePath(path);
+      const name = normalized.slice(normalized.lastIndexOf('/') + 1);
+      if (extension && name.toLowerCase().endsWith(extension.toLowerCase())) {
+        return name.slice(0, -extension.length);
+      }
+      return name;
+    }
+
+    function joinPath(...parts) {
+      return parts.filter(Boolean).join('/').replace(/\/+/g, '/');
+    }
+
+    function formatDate(value) {
+      if (!value) {
+        return '';
+      }
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) {
+        return value;
+      }
+      return new Intl.DateTimeFormat('ko-KR', {
+        dateStyle: 'medium',
+        timeStyle: 'short'
+      }).format(date);
+    }
+
+    function escapeHtml(value) {
+      return String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function escapeRegExp(value) {
+      return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
+    function messageDomId(recordId) {
+      return 'message-' + btoa(unescape(encodeURIComponent(recordId)))
+        .replace(/=+$/g, '')
+        .replace(/[+/]/g, '-');
+    }
+
+    function setStatus(message) {
+      statusBox.textContent = message;
+    }
+  </script>
+</body>
+</html>
